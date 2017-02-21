@@ -106,7 +106,6 @@ struct msm_camera_i2c_seq_reg_setting32 {
 	enum msm_camera_i2c_reg_addr_type addr_type;
 	uint16_t delay;
 };
-#endif
 
 struct msm_camera_i2c_reg_setting32 {
 	compat_uptr_t reg_setting;
@@ -259,4 +258,8 @@ struct msm_flash_cfg_data_t32 {
 
 #define VIDIOC_MSM_FLASH_CFG32 \
 	_IOWR('V', BASE_VIDIOC_PRIVATE + 13, struct msm_flash_cfg_data_t32)
+
 #endif
+
+#endif
+

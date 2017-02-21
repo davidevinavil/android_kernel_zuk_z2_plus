@@ -619,10 +619,11 @@ static int32_t msm_cci_data_queue(struct cci_device *cci_dev,
 	max_queue_size = cci_dev->cci_i2c_queue_info[master][queue].
 			max_queue_size;
 
-	if (c_ctrl->cmd == MSM_CCI_I2C_WRITE_SEQ)
-		queue_size = max_queue_size;
-	else
-		queue_size = max_queue_size/2;
+    if (c_ctrl->cmd == MSM_CCI_I2C_WRITE_SEQ)
+        queue_size = max_queue_size;
+    else
+        queue_size = max_queue_size/2;
+
 	reg_addr = i2c_cmd->reg_addr;
 
 	if (sync_en == MSM_SYNC_ENABLE && cci_dev->valid_sync &&
