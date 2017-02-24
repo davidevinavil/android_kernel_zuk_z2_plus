@@ -49,6 +49,10 @@ struct fpc1020_data {
 	/*Input device*/
 	struct input_dev *input_dev;
 	struct work_struct input_report_work;
+        int proximity_state; /* 0:far 1:near */
+	struct mutex irq_lock;
+	struct workqueue_struct *fpc_wq;
+	struct work_struct irq_work;
 	struct workqueue_struct *fpc1020_wq;
 	u8  report_key;
 	struct wake_lock wake_lock;
@@ -85,6 +89,47 @@ static ssize_t irq_set(struct device* device,
 	return strnlen(buffer, count);
 }
 static DEVICE_ATTR(irq, S_IRUSR | S_IWUSR, irq_get, irq_set);
+
+static ssize_t proximity_state_set(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct  fpc1020_data *fpc1020 = dev_get_drvdata(dev);
+	int rc, val;
+
+	rc = kstrtoint(buf, 10, &val);
+	if (rc)
+		return -EINVAL;
+
+	fpc1020->proximity_state = !!val;
+
+	mutex_lock(&fpc1020->irq_lock);
+	if (!fpc1020->screen_state) {
+		if (fpc1020->proximity_state) {
+			disable_irq_wake(gpio_to_irq(fpc1020->irq_gpio));
+		} else {
+			enable_irq_wake(gpio_to_irq(fpc1020->irq_gpio));
+			rc = gpio_direction_output(fpc1020->rst_gpio, 1);
+			if (rc) {
+				dev_err(fpc1020->dev,
+					"gpio_direction_output failed.\n");
+				mutex_unlock(&fpc1020->irq_lock);
+				return rc;
+			}
+
+			gpio_set_value(fpc1020->rst_gpio, 1);
+			udelay(FPC1020_RESET_HIGH1_US);
+			gpio_set_value(fpc1020->rst_gpio, 0);
+			udelay(FPC1020_RESET_LOW_US);
+			gpio_set_value(fpc1020->rst_gpio, 1);
+			udelay(FPC1020_RESET_HIGH2_US);
+		}
+	}
+	mutex_unlock(&fpc1020->irq_lock);
+
+	return count;
+}
+
+static DEVICE_ATTR(proximity_state, S_IWUSR, NULL, proximity_state_set);
 
 static ssize_t fp_wl_get(struct device* device,
 		struct device_attribute* attribute,
@@ -209,6 +254,11 @@ static void fpc1020_report_work_func(struct work_struct *work)
 		mdelay(30);
 		input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
 		input_sync(fpc1020->input_dev);
+		static irqreturn_t fpc1020_irq_handler(int irq, void *handle)
+{
+	struct fpc1020_data *fpc1020 = handle;
+
+	queue_work(fpc1020->fpc_wq, &fpc1020->irq_work);
 		fpc1020->report_key = 0;
 	}
 }
@@ -228,7 +278,7 @@ static void fpc1020_hw_reset(struct fpc1020_data *fpc1020)
 
 static int fpc1020_get_pins(struct fpc1020_data *fpc1020)
 {
-	int retval = 0;
+	unsigned long irqf;
 	struct device_node *np = fpc1020->dev->of_node;
 
 	fpc1020->irq_gpio = of_get_named_gpio(np, "fpc,gpio_irq", 0);
@@ -257,14 +307,18 @@ err:
 	return retval;
 }
 
-static irqreturn_t fpc1020_irq_handler(int irq, void *_fpc1020)
+static void fpc1020_irq_work(struct work_struct *work)
 {
-	struct fpc1020_data *fpc1020 = _fpc1020;
-	pr_info("fpc1020 IRQ interrupt\n");
-	smp_rmb();
-	wake_lock_timeout(&fpc1020->wake_lock, 3*HZ);
-	sysfs_notify(&fpc1020->dev->kobj, NULL, dev_attr_irq.attr.name);
-	return IRQ_HANDLED;
+	struct fpc1020_data *fpc1020 =
+		container_of(work, typeof(*fpc1020), irq_work);
+	bool status;
+
+	mutex_lock(&fpc1020->irq_lock);
+	status = !fpc1020->screen_state && fpc1020->proximity_state;
+	mutex_unlock(&fpc1020->irq_lock);
+
+	if (status)
+		return;
 }
 
 static int fpc1020_initial_irq(struct fpc1020_data *fpc1020)
@@ -407,6 +461,13 @@ static int fpc1020_probe(struct platform_device *pdev)
 		pr_err("Create input workqueue failed\n");
 		goto error_unregister_device;
 	}
+		fpc1020->fpc_wq = create_singlethread_workqueue("fpc_wq");
+	if (!fpc1020->fpc_wq) {
+		rc = -ENOMEM;
+		goto exit;
+	}
+
+	INIT_WORK(&fpc1020->irq_work, fpc1020_irq_work);
 	INIT_WORK(&fpc1020->input_report_work, fpc1020_report_work_func);
 
 	gpio_direction_output(fpc1020->reset_gpio, 1);
@@ -422,6 +483,7 @@ static int fpc1020_probe(struct platform_device *pdev)
 
 	wake_lock_init(&fpc1020->wake_lock, WAKE_LOCK_SUSPEND, "fpc_wakelock");
 	wake_lock_init(&fpc1020->fp_wl, WAKE_LOCK_SUSPEND, "fp_hal_wl");
+	mutex_init(&fpc1020->irq_lock);
 
 	retval = fpc1020_initial_irq(fpc1020);
 	if (retval != 0) {
