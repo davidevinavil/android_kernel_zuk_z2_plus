@@ -998,10 +998,8 @@ static void update_cpu_freq(int cpu)
 			&& (cpus[cpu].limited_max_freq
 				>= get_core_max_freq(cpu))) {
 			cpumask_xor(&throttling_mask, &mask, &throttling_mask);
-			set_cpu_throttled(&mask, false);
 		} else if (!cpumask_intersects(&mask, &throttling_mask)) {
 			cpumask_or(&throttling_mask, &mask, &throttling_mask);
-			set_cpu_throttled(&mask, true);
 		}
 		trace_thermal_pre_frequency_mit(cpu,
 			cpus[cpu].limited_max_freq,
@@ -2938,6 +2936,8 @@ static int __ref update_offline_cores(int val)
 		}
 	}
 
+	pr_info("cpus_offlined: %d\n", cpus_offlined);
+
 	if (pend_hotplug_req && !in_suspend && !retry_in_progress) {
 		retry_in_progress = true;
 		schedule_delayed_work(&retry_hotplug_work,
@@ -2990,8 +2990,10 @@ static __ref int do_hotplug(void *data)
 				mask |= BIT(cpu);
 			mutex_unlock(&devices->hotplug_dev->clnt_lock);
 		}
-		if (mask != cpus_offlined)
+		if (mask != cpus_offlined){
 			update_offline_cores(mask);
+			pr_info("cpu mask updated: %d\n", mask);
+		}
 		mutex_unlock(&core_control_mutex);
 
 		if (devices && devices->hotplug_dev) {
@@ -4816,6 +4818,8 @@ static ssize_t __ref store_cpus_offlined(struct kobject *kobj,
 		goto done_cc;
 	}
 
+	pr_info("\"%s\"(PID:%i) request cpus offlined mask %d \n", current->comm, current->pid, val);
+
 	for_each_possible_cpu(cpu) {
 		if (!(msm_thermal_info.core_control_mask & BIT(cpu)))
 			continue;
@@ -6391,7 +6395,9 @@ static int probe_cc(struct device_node *node, struct msm_thermal_data *data,
 	int ret = 0;
 
 	if (num_possible_cpus() > 1) {
-		core_control_enabled = 1;
+		key = "qcom,disable-core-control";
+		if (!of_property_read_bool(node, key))
+			core_control_enabled = 1;
 		hotplug_enabled = 1;
 	}
 
@@ -7058,7 +7064,7 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 
 	ret = probe_vdd_mx(node, &data, pdev);
 	if (ret == -EPROBE_DEFER)
-		goto fail;
+		goto probe_exit;
 	/*
 	 * Probe optional properties below. Call probe_psm before
 	 * probe_vdd_rstr because rpm_regulator_get has to be called
@@ -7069,12 +7075,12 @@ static int msm_thermal_dev_probe(struct platform_device *pdev)
 	 */
 	ret = probe_psm(node, &data, pdev);
 	if (ret == -EPROBE_DEFER)
-		goto fail;
+		goto probe_exit;
 
 	update_cpu_topology(&pdev->dev);
 	ret = probe_vdd_rstr(node, &data, pdev);
 	if (ret == -EPROBE_DEFER)
-		goto fail;
+		goto probe_exit;
 	ret = probe_ocr(node, &data, pdev);
 
 	ret = fetch_cpu_mitigaiton_info(&data, pdev);
@@ -7235,7 +7241,7 @@ int __init msm_thermal_late_init(void)
 	if (!msm_thermal_probed)
 		return 0;
 
-	if (num_possible_cpus() > 1)
+	if (num_possible_cpus() > 1 && core_control_enabled)
 		msm_thermal_add_cc_nodes();
 	msm_thermal_add_psm_nodes();
 	msm_thermal_add_vdd_rstr_nodes();
