@@ -342,11 +342,15 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	int state;
 
 	state = (__gpio_get_value(button->gpio) ? 1 : 0) ^ button->active_low;
-		pr_info("************home_button_key %d\n", (int) state);
+
 	if (state == 1) {
+		mdelay(60);
 		home_button_status = 1;
+		pr_info("home button key 1");
 	} else {
+		mdelay(60);
 		home_button_status = 0;
+		pr_info("home button key 0");
 	}
 	if (type == EV_ABS) {
 		if (state)

@@ -57,6 +57,8 @@ struct fpc1020_data {
 	int screen_on;
 };
 
+extern bool home_button_pressed(void);
+
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
 
 static ssize_t irq_get(struct device* device,
@@ -67,7 +69,6 @@ static ssize_t irq_get(struct device* device,
 	int irq = gpio_get_value(fpc1020->irq_gpio);
 	return scnprintf(buffer, PAGE_SIZE, "%i\n", irq);
 }
-
 static ssize_t irq_set(struct device* device,
 		struct device_attribute* attribute,
 		const char* buffer, size_t count)
@@ -93,7 +94,6 @@ static ssize_t fp_wl_get(struct device* device,
 	//struct fpc1020_data* fpc1020 = dev_get_drvdata(device);
 	return 0;
 }
-
 static ssize_t fp_wl_set(struct device* device,
 		struct device_attribute* attribute,
 		const char* buffer, size_t count)
@@ -120,7 +120,6 @@ static ssize_t get_wakeup_status(struct device* device,
 	struct fpc1020_data* fpc1020 = dev_get_drvdata(device);
 	return scnprintf(buffer, PAGE_SIZE, "%i\n", fpc1020->wakeup_status);
 }
-
 static ssize_t set_wakeup_status(struct device* device,
 		struct device_attribute* attribute,
 		const char* buffer, size_t count)
@@ -148,9 +147,12 @@ static DEVICE_ATTR(wakeup, S_IRUSR | S_IWUSR, get_wakeup_status, set_wakeup_stat
 static ssize_t get_key(struct device* device, struct device_attribute* attribute, char* buffer)
 {
 	struct fpc1020_data* fpc1020 = dev_get_drvdata(device);
-	return scnprintf(buffer, PAGE_SIZE, "%i\n", fpc1020->report_key);
+	if (!home_button_pressed())
+		return scnprintf(buffer, PAGE_SIZE, "%i\n", fpc1020->report_key);
+	else 
+		return scnprintf(buffer, PAGE_SIZE, "%i\n", 102);
+	pr_info("Get key = %d\n", (int)fpc1020->report_key);
 }
-
 static ssize_t set_key(struct device* device,
 		struct device_attribute* attribute,
 		const char*buffer, size_t count)
@@ -161,15 +163,18 @@ static ssize_t set_key(struct device* device,
 
 	retval = kstrtou64(buffer, 0, &val);
 	if (!retval) {
+	pr_info("set key = %d\n", (int)val);
 		if (val == KEY_HOME)
 			val = KEY_NAVI_LONG;  //Convert to U-touch long press keyValue
+		if (home_button_pressed())
+			val = 0;
+	pr_info("set key = %d\n", (int)val);
 		fpc1020->report_key = (int)val;
 		pr_info(" %d\n", (int)val);
 		queue_work(fpc1020->fpc1020_wq, &fpc1020->input_report_work);
 	} else
 		return -ENOENT;
 	return strnlen(buffer, count);
-
 }
 static DEVICE_ATTR(key, S_IRUSR | S_IWUSR, get_key, set_key);
 
@@ -199,23 +204,20 @@ static const struct attribute_group attribute_group = {
 	.attrs = attributes,
 };
 
-extern bool home_button_pressed(void);
+
 
 static void fpc1020_report_work_func(struct work_struct *work)
 {
 	struct fpc1020_data *fpc1020 = NULL;
 	fpc1020 = container_of(work, struct fpc1020_data, input_report_work);
-	if (fpc1020->screen_on == 1 && !home_button_pressed()) {
-			pr_info("Report key value = %d\n", (int)fpc1020->report_key);
-			pr_info("Report key pressed = %d\n", (int)home_button_pressed());
-			input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
-			mdelay(10);
-  			input_sync(fpc1020->input_dev);
-			input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
-			input_sync(fpc1020->input_dev);
-			fpc1020->report_key = 0;
-		} else { 
-			pr_info("Report key pressed = %d\n", (int)home_button_pressed());	
+	if (fpc1020->screen_on == 1) {
+		pr_info("Report key value = %d\n", (int)fpc1020->report_key);
+		input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
+		input_sync(fpc1020->input_dev);
+		mdelay(30);
+		input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
+		input_sync(fpc1020->input_dev);
+		fpc1020->report_key = 0;
 	}
 }
 
@@ -262,7 +264,6 @@ err:
 	retval = -ENODEV;
 	return retval;
 }
-
 static irqreturn_t fpc1020_irq_handler(int irq, void *_fpc1020)
 {
 	struct fpc1020_data *fpc1020 = _fpc1020;
@@ -321,8 +322,6 @@ static int fpc1020_manage_sysfs(struct fpc1020_data *fpc1020)
 	}
 	return 0;
 }
-
-
 static int fpc1020_alloc_input_dev(struct fpc1020_data *fpc1020)
 {
 	int retval = 0;
@@ -353,7 +352,6 @@ static int fpc1020_alloc_input_dev(struct fpc1020_data *fpc1020)
 	}
 	return retval;
 }
-
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
 {
 	int *blank;
@@ -372,7 +370,6 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 	}
 	return 0;
 }
-
 static int fpc1020_probe(struct platform_device *pdev)
 {
 	int retval = 0;
@@ -464,6 +461,7 @@ static int fpc1020_resume(struct platform_device *pdev)
 	int retval = 0;
 	return retval;
 }
+
 
 static int fpc1020_suspend(struct platform_device *pdev, pm_message_t state)
 {
