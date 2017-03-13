@@ -164,6 +164,7 @@ static ssize_t set_key(struct device* device,
 		if (val == KEY_HOME)
 			val = KEY_NAVI_LONG;  //Convert to U-touch long press keyValue
 		fpc1020->report_key = (int)val;
+		pr_info(" %d\n", (int)val);
 		queue_work(fpc1020->fpc1020_wq, &fpc1020->input_report_work);
 	} else
 		return -ENOENT;
@@ -198,18 +199,23 @@ static const struct attribute_group attribute_group = {
 	.attrs = attributes,
 };
 
+extern bool home_button_pressed(void);
+
 static void fpc1020_report_work_func(struct work_struct *work)
 {
 	struct fpc1020_data *fpc1020 = NULL;
 	fpc1020 = container_of(work, struct fpc1020_data, input_report_work);
-	if (fpc1020->screen_on == 1) {
-		pr_info("Report key value = %d\n", (int)fpc1020->report_key);
-		input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
-		input_sync(fpc1020->input_dev);
-		mdelay(30);
-		input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
-		input_sync(fpc1020->input_dev);
-		fpc1020->report_key = 0;
+	if (fpc1020->screen_on == 1 && !home_button_pressed()) {
+			pr_info("Report key value = %d\n", (int)fpc1020->report_key);
+			pr_info("Report key pressed = %d\n", (int)home_button_pressed());
+			input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
+			mdelay(10);
+  			input_sync(fpc1020->input_dev);
+			input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
+			input_sync(fpc1020->input_dev);
+			fpc1020->report_key = 0;
+		} else { 
+			pr_info("Report key pressed = %d\n", (int)home_button_pressed());	
 	}
 }
 

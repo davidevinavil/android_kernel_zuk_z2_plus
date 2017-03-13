@@ -332,6 +332,8 @@ static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
+bool home_button_status;
+
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
@@ -340,7 +342,12 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	int state;
 
 	state = (__gpio_get_value(button->gpio) ? 1 : 0) ^ button->active_low;
-
+		pr_info("************home_button_key %d\n", (int) state);
+	if (state == 1) {
+		home_button_status = 1;
+	} else {
+		home_button_status = 0;
+	}
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
@@ -1006,6 +1013,16 @@ static int __init gpio_keys_init(void)
 static void __exit gpio_keys_exit(void)
 {
 	platform_driver_unregister(&gpio_keys_device_driver);
+}
+
+bool home_button_pressed(void)
+{
+	if (home_button_status == 1) {
+		return true;
+	}
+	else {
+		return false;
+	}
 }
 
 late_initcall(gpio_keys_init);
