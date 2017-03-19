@@ -226,18 +226,32 @@ static const struct attribute_group attribute_group = {
 	.attrs = attributes,
 };
 
+extern bool home_button_pressed(void);
+bool key_home_pressed = false;
+EXPORT_SYMBOL(key_home_pressed);
+
+bool ignore_keypad;
+
 static void fpc1020_report_work_func(struct work_struct *work)
 {
 	struct fpc1020_data *fpc1020 = NULL;
 	fpc1020 = container_of(work, struct fpc1020_data, input_report_work);
+
+	if (home_button_pressed())
+		ignore_keypad = true;
+	else
+		ignore_keypad = false;
+
 	if (fpc1020->screen_on == 1) {
-		pr_info("Report key value = %d\n", (int)fpc1020->report_key);
-		input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
-		input_sync(fpc1020->input_dev);
-		mdelay(30);
-		input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
-		input_sync(fpc1020->input_dev);
-		fpc1020->report_key = 0;
+		if (ignore_keypad) {
+			pr_info("Report key value = %d\n", (int)fpc1020->report_key);
+			input_report_key(fpc1020->input_dev, fpc1020->report_key, 1);
+			mdelay(30);
+  			input_sync(fpc1020->input_dev);
+			input_report_key(fpc1020->input_dev, fpc1020->report_key, 0);
+			input_sync(fpc1020->input_dev);
+			fpc1020->report_key = 0;
+		}
 	}
 }
 
